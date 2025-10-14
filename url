@@ -1,0 +1,46 @@
+
+from django.urls import path
+from .views import FileUploadView, SearchView
+
+urlpatterns = [
+    path('upload/', FileUploadView.as_view(), name='file-upload'),
+    path('search/', SearchView.as_view(), name='data-search'),
+]
+models.py
+# api/models.py
+
+from django.db import models
+
+class Roster(models.Model):
+    name = models.CharField(max_length=255)
+    team = models.CharField(max_length=255, null=True, blank=True)
+    date = models.DateField()
+    schedule = models.CharField(max_length=255, null=True, blank=True)
+
+    class Meta:
+        unique_together = ('name', 'date')
+
+    def __str__(self):
+        return f"{self.name} - {self.date}"
+
+class Attendance(models.Model):
+    name = models.CharField(max_length=255)
+    # This line has been changed from IntegerField to CharField
+    employee_id = models.CharField(max_length=255, null=True, blank=True)
+    date = models.DateField()
+    user_type = models.CharField(max_length=100, null=True, blank=True)
+    designation = models.CharField(max_length=255, null=True, blank=True)
+    department = models.CharField(max_length=255, null=True, blank=True)
+    location = models.CharField(max_length=255, null=True, blank=True)
+    first_in = models.TimeField(null=True, blank=True)
+    last_out = models.TimeField(null=True, blank=True)
+    gross_time = models.TimeField(null=True, blank=True)
+    out_of_office_time = models.TimeField(null=True, blank=True)
+    out_of_office_count = models.IntegerField(null=True, blank=True)
+    net_office_time = models.TimeField(null=True, blank=True)
+
+    class Meta:
+        unique_together = ('name', 'date')
+
+    def __str__(self):
+        return f"{self.name} ({self.employee_id}) - {self.date}"
