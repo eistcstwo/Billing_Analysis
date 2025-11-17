@@ -1,0 +1,354 @@
+import React, { useState, useEffect, useRef } from 'react';
+import Header from './components/Header.jsx';
+import Footer from './components/Footer';
+import Menu from './components/Menu';
+import Dashboard from './components/Dashboard';
+import Chatbot from './components/ChatBot';
+import Login from './components/Login';
+import './App.css';
+import { fetchLatestAnnouncement,  } from './api/PostApi';
+
+// Robust function to clear all cookies (within JS limitations)
+function clearAllCookies() {
+  const cookies = document.cookie.split(";");
+  for (const cookie of cookies) {
+    const eqPos = cookie.indexOf("=");
+    const name = eqPos > -1 ? cookie.substr(0, eqPos).trim() : cookie.trim();
+    // Remove cookie for root path
+    document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/`;
+    // Attempt to remove cookie for every path segment
+    const pathSegments = window.location.pathname.split('/');
+    let path = '';
+    for (let i = 0; i < pathSegments.length; i++) {
+      path += (path.endsWith('/') ? '' : '/') + pathSegments[i];
+      document.cookie = `${name}=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=${path};`;
+    }
+  }
+}
+
+// Function to conditionally disable inspect element
+function useDisableInspectElement(enabled) {
+  useEffect(() => {
+    if (!enabled) return;
+
+    document.oncontextmenu = function() {
+      return false;
+    };
+
+    const handleKeyDown = (e) => {
+      // F12
+      if (e.keyCode === 123) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      // Ctrl+Shift+I/J/C/U, Ctrl+U (view source), Cmd+Opt+I (Mac)
+      if (
+        (e.ctrlKey && e.shiftKey && ['I', 'J', 'C', 'U'].includes(e.key.toUpperCase())) ||
+        (e.ctrlKey && e.key.toUpperCase() === 'U') ||
+        (e.metaKey && e.altKey && e.key.toUpperCase() === 'I')
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+
+    const handleDragStart = (e) => e.preventDefault();
+    document.addEventListener('dragstart', handleDragStart);
+
+    const handleSelectStart = (e) => {
+      if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    document.addEventListener('keydown', handleSelectStart);
+
+    return () => {
+      document.removeEventListener('contextmenu', document.oncontextmenu);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('dragstart', handleDragStart);
+      document.removeEventListener('keydown', handleSelectStart);
+    };
+  }, [enabled]);
+}
+
+// Login API call to get userLevel and other details
+async function loginApi(username, password) {
+  const response = await fetch('https://10.191.171.12:5443/EISHOME/awthenticationService/newLogin/',
+ // const response = await fetch('https://10.191.171.12:5443/EISHOME/EISHome/newLogin/',
+          {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ username, password })
+  });
+
+  return response.json(); // should contain userLevel and other info
+}
+
+// Logout API call
+async function callLogoutAPI(username) {
+  try {
+    // 1. Retrieve the session ID from local storage
+    const sessionId = localStorage.getItem('sessionid');
+
+    // Check if session ID exists before proceeding
+    if (!sessionId) {
+      console.warn('No session ID found in local storage. Skipping API call.');
+      // Optional: Handle the case where user isn't logged in
+      return;
+    }
+
+    // 2. Prepare the headers object with the correct Authorization format
+    const headers = {
+      'Content-Type': 'application/json',
+      // CORRECT FORMAT: Use template literals correctly with backticks ` `
+      'Authorization': `Bearer ${sessionId}`
+    };
+
+    const response = await fetch('https://10.191.171.12:5443/EISHOME/awthenticationService/newLogout/',
+            {
+      method: 'POST',
+      // 3. Use the headers object in the fetch call
+      headers: headers,
+      credentials: 'include',
+      body: JSON.stringify({
+        username: username,
+        timestamp: new Date().toISOString()
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('Logout API call failed:', response.status, response.statusText);
+      // Optional: Handle specific error responses if needed
+    } else {
+      console.log('Logout API call successful');
+      // Optional: Clear the session ID from local storage after successful logout
+      localStorage.removeItem('sessionId');
+    }
+  } catch (error) {
+    console.error('Error calling logout API:', error);
+    // Don't prevent logout even if API call fails
+  }
+}
+
+function App() {
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [chatbotMinimized, setChatbotMinimized] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [username, setUsername] = useState('');
+  const [announcement, setAnnouncement] = useState('');
+  const [showAnnouncementPopup, setShowAnnouncementPopup] = useState(false);
+  const [userLevel, setUserLevel] = useState('');
+  const inactivityTimer = useRef(null);
+
+  // Inactivity time limit in ms (60 minutes)
+  const INACTIVITY_LIMIT = 60 * 60 * 1000;
+
+  // Define allowed user levels for Chatbot access
+  const CHATBOT_ALLOWED_LEVELS = ['ADMIN', 'L2', 'Banker'];
+  const CHATBOT_BLOCKED_LEVELS = ['Support'];
+
+  // Check if current user has access to chatbot
+  const hasChatbotAccess = CHATBOT_ALLOWED_LEVELS.includes(userLevel) &&
+                           !CHATBOT_BLOCKED_LEVELS.includes(userLevel);
+
+  // Only disable inspect for users other than ADMIN
+  useDisableInspectElement(userLevel && userLevel !== 'ADMIN');
+
+  // Check for existing login session on app load
+
+  // Set login timestamp and userLevel on login
+
+  const handleLogin = async (user, password) => {
+    try {
+      const loginData = await loginApi(user, password);
+      console.log(loginData);
+
+      // Assume loginData contains necessary user info and a session ID/token
+      // which should be handled by loginApi function implicitly (via cookies/credentials: 'include')
+      // or explicitly passed back in the response.
+
+      const now = Date.now();
+
+      // 1. Set local state (these might be lost on reload but good practice)
+      setUsername(user);
+      setUserLevel(loginData.userLevel);
+      setIsLoggedIn(true);
+
+      // 2. IMPORTANT: Save data to localStorage/sessionStorage FIRST
+      localStorage.setItem('username', user);
+      localStorage.setItem('userLevel', loginData.userLevel); // Make sure 'userLevel' key is consistent
+      localStorage.setItem('loginTime', now.toString());
+      sessionStorage.setItem('loginTime', now.toString());
+
+      // If your API call also returns a specific session ID to store, add it here:
+      // localStorage.setItem('sessionid', loginData.sessionId);
+
+      // 3. ADD THE AUTO-REFRESH HERE
+      window.location.reload();
+
+      // 4. The following code will execute extremely briefly, if at all,
+      //    before the browser reloads the page.
+      //    The fetching of announcements should probably be moved to a useEffect hook
+      //    that runs AFTER a successful login (on mount, checking localStorage).
+
+      /*
+      const ann = await fetchLatestAnnouncement();
+      setAnnouncement(ann);
+      if (ann) setShowAnnouncementPopup(true);
+      */
+
+    } catch (err) {
+      alert('Login failed: ' + err.message);
+    }
+  };
+
+useEffect(() => {
+    const storedUsername = localStorage.getItem('username');
+    const storedLoginTime = localStorage.getItem('loginTime');
+    const storedUserLevel = localStorage.getItem('userlevel');
+    console.log(storedUserLevel);
+
+    if (storedUsername && storedLoginTime && storedUserLevel) {
+      setUsername(storedUsername);
+      setUserLevel(storedUserLevel); // <- ensure userLevel is set!
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+
+  // On login from persisted session, fetch announcement
+  useEffect(() => {
+    if (isLoggedIn && !announcement) {
+      (async () => {
+        const ann = await fetchLatestAnnouncement();
+        setAnnouncement(ann);
+        if (ann) setShowAnnouncementPopup(true);
+      })();
+    }
+    // eslint-disable-next-line
+  }, [isLoggedIn]);
+
+  // Logout and flush session storage, local storage, cookies, and caches
+  const handleLogout = async () => {
+    await callLogoutAPI(username);
+
+    setIsLoggedIn(false);
+    setUsername('');
+    setUserLevel('');
+     localStorage.clear();
+    sessionStorage.clear();
+    clearAllCookies();
+
+
+    // Optionally, redirect or show a message here
+  };
+
+
+ // --- START of New Cross-Tab Storage Listener Logic ---
+  useEffect(() => {
+    const handleStorageChange = (event) => {
+      // Check if the specific key for the session ID was changed
+      // Note: I'm assuming your key is 'sessionid' based on callLogoutAPI function
+      if (event.key === 'sessionid') {
+        // If newValue is null/empty, the user logged out in another tab
+        if (!event.newValue) {
+          console.log("Session ID removed in another tab. Triggering logout.");
+          // Call your existing logout handler
+          handleLogout();
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, [handleLogout]); // Dependency on handleLogout ensures we call the correct function instance
+
+
+  // Auto logout after 60 min of inactivity
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    const resetInactivityTimer = () => {
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+      inactivityTimer.current = setTimeout(() => {
+        alert('You have been logged out due to 60 minutes of inactivity.');
+        handleLogout();
+      }, INACTIVITY_LIMIT);
+    };
+
+    // List of events indicating user activity
+    const events = ['mousemove', 'keydown', 'mousedown', 'touchstart', 'scroll'];
+
+    // Add event listeners
+    events.forEach(event =>
+      window.addEventListener(event, resetInactivityTimer, true)
+    );
+
+    // Start timer initially
+    resetInactivityTimer();
+
+    // Cleanup event listeners and timer on unmount or logout
+    return () => {
+      events.forEach(event =>
+        window.removeEventListener(event, resetInactivityTimer, true)
+      );
+      if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    };
+  }, [isLoggedIn]);
+
+  if (!isLoggedIn) {
+    // Login component must now provide both username and password to handleLogin
+    return <Login onLogin={handleLogin} />;
+  }
+
+  return (
+    <div>
+      <Header
+        darkMode={darkMode}
+        setDarkMode={setDarkMode}
+        username={username}
+        onLogout={handleLogout}
+      />
+      {/* Announcement Popup */}
+      {showAnnouncementPopup && announcement &&
+        <div className="announcement-popup-overlay">
+          <div className="announcement-popup">
+            <button
+              className="announcement-popup-close"
+              onClick={() => setShowAnnouncementPopup(false)}
+              aria-label="Close announcement"
+            >
+              ×
+            </button>
+            <div className="announcement-popup-content">
+              <h3>Announcement</h3>
+              <div>{announcement}</div>
+            </div>
+          </div>
+        </div>
+      }
+      {!chatbotMinimized && <div className="app-background" />}
+      <div className={`main ${isSidebarOpen ? "sidebar-open" : "sidebar-collapsed"}`}>
+        <Menu
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
+        />
+        <Dashboard isSidebarOpen={isSidebarOpen} />
+        {/* Conditionally render Chatbot only for specific user levels */}
+        {hasChatbotAccess && (
+          <Chatbot setChatbotMinimized={setChatbotMinimized} username={username} />
+        )}
+      </div>
+      <Footer />
+    </div>
+  );
+}
+
+export default App;
