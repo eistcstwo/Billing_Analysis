@@ -1,0 +1,435 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { getHistoryHandovers } from './handoverHistoryApi';
+import './TasksList.css'; // your existing CSS file
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 10;
+
+function formatDateTime(raw) {
+  if (!raw) return '—';
+  const d = new Date(raw.replace(' ', 'T'));
+  if (isNaN(d)) return raw;
+  const date = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return `${date}  ${time}`;
+}
+
+function getStatusClass(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'completed') return 'set-status set-status-completed';
+  return 'set-status';
+}
+
+function getDotClass(status) {
+  const s = (status || '').toLowerCase();
+  if (s === 'completed') return 'status-completed';
+  if (s === 'pending') return 'status-current';
+  return 'status-pending';
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
+export default function HandoverHistoryPage() {
+  const [data, setData]               = useState([]);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState(null);
+  const [search, setSearch]           = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortKey, setSortKey]         = useState('id');
+  const [sortDir, setSortDir]         = useState('desc');
+  const [page, setPage]               = useState(1);
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await getHistoryHandovers();
+      setData(res?.SubsetsData || []);
+    } catch (e) {
+      setError(e.message || 'Failed to fetch handover history.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  // ── Filter ────────────────────────────────────────────────────────────────
+  const filtered = data.filter((r) => {
+    const q = search.toLowerCase();
+    const matchSearch =
+      !q ||
+      String(r.id).includes(q) ||
+      (r.infraName   || '').toLowerCase().includes(q) ||
+      (r.infraId     || '').toLowerCase().includes(q) ||
+      (r.supportName || '').toLowerCase().includes(q) ||
+      (r.supportId   || '').toLowerCase().includes(q) ||
+      (r.serverSet   || '').toLowerCase().includes(q) ||
+      (r.serverList  || '').toLowerCase().includes(q);
+    const matchStatus =
+      statusFilter === 'all' || (r.status || '').toLowerCase() === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
+  // ── Sort ──────────────────────────────────────────────────────────────────
+  const sorted = [...filtered].sort((a, b) => {
+    let av = a[sortKey] ?? '';
+    let bv = b[sortKey] ?? '';
+    if (typeof av === 'number') return sortDir === 'asc' ? av - bv : bv - av;
+    return sortDir === 'asc'
+      ? String(av).localeCompare(String(bv))
+      : String(bv).localeCompare(String(av));
+  });
+
+  // ── Paginate ──────────────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated  = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleSort = (key) => {
+    if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(1);
+  };
+
+  const statuses = [
+    'all',
+    ...Array.from(new Set(data.map((r) => (r.status || '').toLowerCase()).filter(Boolean))),
+  ];
+
+  const completedCount = data.filter((r) => (r.status || '').toLowerCase() === 'completed').length;
+
+  // ── Table columns config ──────────────────────────────────────────────────
+  const columns = [
+    { key: 'id',              label: '#',               sortable: true },
+    { key: 'status',          label: 'Status',          sortable: true },
+    { key: 'infraName',       label: 'Infra Name',      sortable: true },
+    { key: 'infraId',         label: 'Infra ID',        sortable: true },
+    { key: 'supportName',     label: 'Support Name',    sortable: true },
+    { key: 'supportId',       label: 'Support ID',      sortable: true },
+    { key: 'serverSet',       label: 'Server Set',      sortable: true },
+    { key: 'serverList',      label: 'Servers',         sortable: false },
+    { key: 'brokerRestartId', label: 'Broker Restart',  sortable: true },
+    { key: 'startTime',       label: 'Start Time',      sortable: true },
+    { key: 'endTime',         label: 'End Time',        sortable: true },
+    { key: 'supportTime',     label: 'Support Time',    sortable: true },
+  ];
+
+  // ── Render cell ───────────────────────────────────────────────────────────
+  const renderCell = (row, key) => {
+    switch (key) {
+      case 'id':
+        return <span className="subset-id">#{row.id}</span>;
+
+      case 'status':
+        return (
+          <span className={getStatusClass(row.status)}>
+            {row.status || '—'}
+          </span>
+        );
+
+      case 'infraName':
+        return (
+          <span className="infra-name">
+            <strong>{row.infraName || '—'}</strong>
+          </span>
+        );
+
+      case 'infraId':
+        return <span className="subset-id">{row.infraId || '—'}</span>;
+
+      case 'supportName':
+        return (
+          <span className="infra-name">
+            <strong>{row.supportName || '—'}</strong>
+          </span>
+        );
+
+      case 'supportId':
+        return <span className="subset-id">{row.supportId || '—'}</span>;
+
+      case 'serverSet':
+        return (
+          <span className="server-set-badge">{row.serverSet || '—'}</span>
+        );
+
+      case 'serverList':
+        if (!row.serverList) return <span style={{ color: 'var(--text-secondary)' }}>—</span>;
+        return (
+          <div className="server-numbers-compact">
+            {row.serverList}
+          </div>
+        );
+
+      case 'brokerRestartId':
+        return (
+          <span className="subset-id">{row.brokerRestartId ?? '—'}</span>
+        );
+
+      case 'startTime':
+      case 'endTime':
+      case 'supportTime':
+        return (
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontFamily: "'Courier New', monospace" }}>
+            {row[key] ? formatDateTime(row[key]) : '—'}
+          </span>
+        );
+
+      default:
+        return <span>{row[key] ?? '—'}</span>;
+    }
+  };
+
+  // ── Inline table styles (layout only — not overriding your CSS theme) ─────
+  const tableStyle = {
+    width: '100%',
+    borderCollapse: 'collapse',
+    fontSize: '0.88rem',
+  };
+  const thStyle = {
+    padding: '0.9rem 1.1rem',
+    textAlign: 'left',
+    color: 'var(--primary-blue)',
+    borderBottom: '2px solid var(--border-color)',
+    whiteSpace: 'nowrap',
+    fontWeight: 700,
+    fontSize: '0.78rem',
+    textTransform: 'uppercase',
+    letterSpacing: '0.6px',
+    background: 'rgba(46,213,255,0.04)',
+    cursor: 'pointer',
+    userSelect: 'none',
+  };
+  const tdStyle = {
+    padding: '0.9rem 1.1rem',
+    borderBottom: '1px solid rgba(255,255,255,0.04)',
+    verticalAlign: 'middle',
+  };
+  const trHoverStyle = {
+    transition: 'background 0.2s',
+  };
+
+  // ── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="tasks-list-page">
+
+      {/* ── Page Header ── */}
+      <div className="tasks-list-header">
+        <div className="header-content">
+          <h1>📋 Shift Handover History</h1>
+          <p>Complete audit log of all shift handover sessions</p>
+        </div>
+
+        <div className="header-details">
+          <p>Total Records <strong>{data.length}</strong></p>
+          <p>Completed <strong>{completedCount}</strong></p>
+          <p>Filtered <strong>{filtered.length}</strong></p>
+          <p>Page <strong>{page} / {totalPages}</strong></p>
+
+          <button
+            className="btn-refresh-status"
+            onClick={fetchData}
+            disabled={loading}
+          >
+            {loading ? '⏳ Loading…' : '🔄 Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Filters Banner ── */}
+      <div className="user-info-banner">
+        <div className="user-info-content">
+
+          {/* Search */}
+          <span className="user-label">🔍 Search</span>
+          <input
+            className="form-input"
+            style={{ minWidth: '260px', padding: '0.55rem 1rem' }}
+            placeholder="Infra, support, server, set…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          />
+
+          {/* Status filter */}
+          <span className="user-label">Status</span>
+          <select
+            className="form-input server-set-dropdown"
+            style={{ minWidth: '160px', padding: '0.55rem 2.5rem 0.55rem 1rem', cursor: 'pointer' }}
+            value={statusFilter}
+            onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          >
+            {statuses.map((s) => (
+              <option key={s} value={s}>
+                {s === 'all' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* ── Table Section ── */}
+      <div className="activity-log-section" style={{ padding: 0, overflow: 'hidden' }}>
+
+        <h2 style={{ padding: '1.75rem 2rem', marginBottom: 0 }}>
+          🗂 Handover Sessions
+        </h2>
+
+        {/* Loading */}
+        {loading && (
+          <div className="loading-container">
+            <div className="loading-spinner" />
+            <p className="loading-text">Fetching handover records…</p>
+          </div>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <div className="loading-container">
+            <span style={{ fontSize: '2.5rem' }}>⚠️</span>
+            <p className="loading-text" style={{ color: 'var(--error-red)' }}>{error}</p>
+            <button className="btn-primary" onClick={fetchData}>Retry</button>
+          </div>
+        )}
+
+        {/* Empty */}
+        {!loading && !error && sorted.length === 0 && (
+          <div className="loading-container">
+            <span style={{ fontSize: '2.5rem' }}>🔍</span>
+            <p className="loading-text">No records match your filters.</p>
+          </div>
+        )}
+
+        {/* Table */}
+        {!loading && !error && sorted.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      style={thStyle}
+                      onClick={() => col.sortable && handleSort(col.key)}
+                    >
+                      {col.label}
+                      {col.sortable && (
+                        <span style={{ marginLeft: '0.4rem', opacity: sortKey === col.key ? 1 : 0.3 }}>
+                          {sortKey === col.key ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}
+                        </span>
+                      )}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.map((row) => (
+                  <tr
+                    key={row.id}
+                    style={trHoverStyle}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(46,213,255,0.04)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    {columns.map((col) => (
+                      <td key={col.key} style={tdStyle}>
+                        {renderCell(row, col.key)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* ── Pagination ── */}
+        {!loading && !error && sorted.length > 0 && (
+          <div
+            className="set-progress-info"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '1.25rem 2rem',
+              borderTop: '1px solid var(--border-color)',
+              flexWrap: 'wrap',
+              gap: '1rem',
+            }}
+          >
+            {/* Info */}
+            <span className="log-message">
+              Showing{' '}
+              <strong style={{ color: 'var(--primary-blue)' }}>
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)}
+              </strong>{' '}
+              of{' '}
+              <strong style={{ color: 'var(--primary-blue)' }}>{sorted.length}</strong>{' '}
+              records
+            </span>
+
+            {/* Buttons */}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button
+                className="btn-secondary"
+                style={{ padding: '0.45rem 0.9rem', fontSize: '0.875rem' }}
+                disabled={page === 1}
+                onClick={() => setPage(1)}
+              >«</button>
+
+              <button
+                className="btn-secondary"
+                style={{ padding: '0.45rem 0.9rem', fontSize: '0.875rem' }}
+                disabled={page === 1}
+                onClick={() => setPage((p) => p - 1)}
+              >‹</button>
+
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let p;
+                if (totalPages <= 5)        p = i + 1;
+                else if (page <= 3)         p = i + 1;
+                else if (page >= totalPages - 2) p = totalPages - 4 + i;
+                else                        p = page - 2 + i;
+                return (
+                  <button
+                    key={p}
+                    className="btn-secondary"
+                    style={{
+                      padding: '0.45rem 0.9rem',
+                      fontSize: '0.875rem',
+                      ...(page === p
+                        ? {
+                            background: 'rgba(46,213,255,0.15)',
+                            borderColor: 'var(--primary-blue)',
+                            color: 'var(--primary-blue)',
+                            fontWeight: 700,
+                          }
+                        : {}),
+                    }}
+                    onClick={() => setPage(p)}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+
+              <button
+                className="btn-secondary"
+                style={{ padding: '0.45rem 0.9rem', fontSize: '0.875rem' }}
+                disabled={page === totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >›</button>
+
+              <button
+                className="btn-secondary"
+                style={{ padding: '0.45rem 0.9rem', fontSize: '0.875rem' }}
+                disabled={page === totalPages}
+                onClick={() => setPage(totalPages)}
+              >»</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+    </div>
+  );
+}
