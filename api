@@ -1,27 +1,31 @@
-import api from './api'; // your existing axios instance
-
-export const getHistoryHandovers = async () => {
+export const getHistoryHandovers = async (date) => {
   try {
     const uid = localStorage.getItem('uidd');
-    const password = localStorage.getItem('password');
-
-    if (!uid || !password) {
-      throw new Error('Authentication credentials not found in localStorage');
+ 
+    if (!uid) {
+      throw new Error('User ID (uidd) not found in localStorage');
     }
-
-    const payload = { uidd: uid, password };
-
+ 
+    if (!date) {
+      throw new Error('Date is required');
+    }
+ 
+    const payload = {
+      uidd: uid,
+      date: date,   // YYYY-MM-DD
+    };
+ 
     const response = await api.post('/get_shiftHandover_history/', payload, {
       timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
       },
     });
-
+ 
     console.log('getHistoryHandovers response:', response);
     return response.data;
+ 
   } catch (error) {
     console.error('getHistoryHandovers error:', error);
     throw error;
   }
-};
