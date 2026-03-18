@@ -1,0 +1,59 @@
+@csrf_exempt
+def getHistoryBrokerRestart(request):
+    if request.method == 'POST':
+       data_json = json.loads(request.body.decode('utf-8'))
+       uid = data_json.get("uidd")
+       '''if not authenticate(uid,password):
+           return JsonResponse({"msg":"An error occured while fetching the data"},status=200,safe=False)'''
+       token = request.headers.get("Authorization")
+       if not token:
+          return JsonResponse({"message": "Session unautherize"}, status=401, safe=False)
+       try:
+          sessionStatus=decode_jwt_token_api(token)
+          if not sessionStatus:
+             return JsonResponse({"message": "Session unautherize"}, status=401, safe=False)
+       except Exception as e:
+          print(e)
+          return JsonResponse({"message": "user unauthorized"}, status=401, safe=False)
+       try:
+          user=None
+          if Usermaster.objects.filter(AdId=str(uid)).exists():
+             user = list(Usermaster.objects.filter(AdId = str(uid)).values())
+          TeamHandoverDetails = list(Team_Role.objects.filter(rid = user[0]['Rid_id']).values())
+          handoverId=TeamHandoverDetails[0]["handover_id_id"]
+          TasksDetails=""
+          if TeamHandoverDetails:
+             TasksDetails = list(historyCompleted.objects.filter(handover_id=handoverId).values())
+             if TasksDetails == "":
+                return JsonResponse({"TeamHandoverDetails":TeamHandoverDetails,"Tasksdata":TasksDetails},status=200,safe=False)
+             if TasksDetails:
+                for k in TasksDetails:
+                    ackDetails = list(historyAcknowledge.objects.filter(ackTask_id=k["historyTaskId"]).values())
+                    ackDict={}
+                    k["acknowledgeDetails"]=ackDetails
+          return  JsonResponse({"TeamHandoverDetails":TeamHandoverDetails,"Tasksdata":TasksDetails},status=200,safe=False)
+          #return JsonResponse("data":handoverDetais,safe=False)
+       except Exception as e:
+          return JsonResponse({"msg":str(e)},safe=False)
+       return JsonResponse({"msg":"403 bad request"},safe=False)
+
+
+
++-----------------+--------------+------+-----+---------+----------------+
+| Field           | Type         | Null | Key | Default | Extra          |
++-----------------+--------------+------+-----+---------+----------------+
+| id              | int unsigned | NO   | PRI | NULL    | auto_increment |
+| status          | varchar(100) | NO   |     | NULL    |                |
+| startTime       | varchar(100) | NO   |     | NULL    |                |
+| endTime         | varchar(100) | NO   |     | NULL    |                |
+| supportTime     | varchar(100) | NO   |     | NULL    |                |
+| supportId       | varchar(30)  | NO   |     | NULL    |                |
+| brokerRestartId | int unsigned | YES  | MUL | NULL    |                |
+| infraId         | varchar(50)  | YES  |     | NULL    |                |
+| infraName       | varchar(80)  | YES  |     | NULL    |                |
+| supportName     | varchar(80)  | YES  |     | NULL    |                |
+| serverList      | varchar(400) | YES  |     | NULL    |                |
+| serverSet       | varchar(400) | YES  |     | NULL    |                |
++-----------------+--------------+------+-----+---------+----------------+
+
+
