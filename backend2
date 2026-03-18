@@ -1,0 +1,58 @@
+@csrf_exempt
+def getSubsetsByDate(request):
+    if request.method == 'POST':
+        data_json = json.loads(request.body.decode('utf-8'))
+        uid  = data_json.get("uidd")
+        date = data_json.get("date")  # Expected format: "YYYY-MM-DD"
+
+        token = request.headers.get("Authorization")
+        if not token:
+            return JsonResponse({"message": "Session unauthorized"}, status=401, safe=False)
+        try:
+            sessionStatus = decode_jwt_token_api(token)
+            if not sessionStatus:
+                return JsonResponse({"message": "Session unauthorized"}, status=401, safe=False)
+        except Exception as e:
+            print(e)
+            return JsonResponse({"message": "User unauthorized"}, status=401, safe=False)
+
+        try:
+            # Validate user
+            if not Usermaster.objects.filter(AdId=str(uid)).exists():
+                return JsonResponse({"msg": "User not found"}, status=404, safe=False)
+
+            # Validate date
+            if not date:
+                return JsonResponse({"msg": "Date is required"}, status=400, safe=False)
+            try:
+                parsed_date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d")
+            except ValueError:
+                return JsonResponse({"msg": "Invalid date format. Use YYYY-MM-DD"}, status=400, safe=False)
+
+            # Filter subsets on startTime only
+            subsets_data = list(
+                subsets.objects.filter(
+                    startTime__startswith=parsed_date
+                ).values(
+                    'id',
+                    'status',
+                    'startTime',
+                    'endTime',
+                    'supportTime',
+                    'supportId',
+                    'brokerRestartId',
+                    'infraId',
+                    'infraName',
+                    'supportName',
+                    'serverList',
+                    'serverSet'
+                )
+            )
+
+            if not subsets_data:
+                return JsonResponse({"msg": "No records found for the given date", "SubsetsData": []}, status=200, safe=False)
+
+            return JsonResponse({"SubsetsData": subsets_data}, status=200, safe=False)
+
+        except Exception as e:
+            return JsonResponse({"msg": str(e)}, status=500, safe=False)
