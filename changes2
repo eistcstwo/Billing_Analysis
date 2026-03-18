@@ -1,33 +1,34 @@
 import React, { useState, useCallback } from 'react';
-import { getHistoryHandovers } from './handoverHistoryApi';
-import './TasksList.css';
+import { getBrokerRestartHistory } from '../../Api/HandOverApi';
+import './BrokerRestartHistory.css';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAGE_SIZE = 10;
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function formatDateTime(raw) {
-  if (!raw) return '—';
+  if (!raw) return null;
   const d = new Date(raw.replace(' ', 'T'));
-  if (isNaN(d)) return raw;
-  const date = d.toLocaleDateString('en-GB', {
-    day: '2-digit', month: 'short', year: 'numeric',
-  });
-  const time = d.toLocaleTimeString('en-GB', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
-  return { date, time };
+  if (isNaN(d)) return null;
+  return {
+    date: d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+    time: d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+  };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function TimeCell({ value }) {
-  if (!value) return <span style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>—</span>;
-  const { date, time } = formatDateTime(value);
+  const parts = formatDateTime(value);
+  if (!parts) return <span style={{ color: 'var(--text-secondary)', opacity: 0.4 }}>—</span>;
   return (
     <div style={{ lineHeight: 1.6 }}>
-      <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{date}</div>
-      <div style={{ color: 'var(--primary-blue)', fontSize: '0.85rem', fontFamily: "'Courier New', monospace", fontWeight: 600 }}>{time}</div>
+      <div style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>{parts.date}</div>
+      <div style={{ color: 'var(--primary-blue)', fontSize: '0.85rem', fontFamily: "'Courier New', monospace", fontWeight: 600 }}>
+        {parts.time}
+      </div>
     </div>
   );
 }
@@ -46,16 +47,16 @@ function ServerListCell({ list }) {
 
 function StatusBadge({ status }) {
   const s = (status || '').toLowerCase();
-  const cls = s === 'completed' ? 'set-status set-status-completed' : 'set-status';
-  const dot = s === 'completed' ? '✓' : s === 'pending' ? '○' : '•';
+  const isCompleted = s === 'completed';
+  const dot = isCompleted ? '✓' : s === 'pending' ? '○' : '•';
   return (
-    <span className={cls}>
+    <span className={`set-status${isCompleted ? ' set-status-completed' : ''}`}>
       {dot} {status || '—'}
     </span>
   );
 }
 
-// ─── Column definitions — only fields that appear in the actual API response ──
+// ─── Column definitions ───────────────────────────────────────────────────────
 
 const COLUMNS = [
   {
@@ -85,10 +86,7 @@ const COLUMNS = [
           {r.supportName || '—'}
         </div>
         <div>
-          <span
-            className="infra-info"
-            style={{ fontSize: '0.75rem', marginTop: '0.2rem', display: 'inline-block' }}
-          >
+          <span className="infra-info" style={{ fontSize: '0.75rem', marginTop: '0.2rem', display: 'inline-block' }}>
             ID: {r.supportid || '—'}
           </span>
         </div>
@@ -106,7 +104,7 @@ const COLUMNS = [
     key: 'status',
     label: 'Status',
     sortable: true,
-    width: '120px',
+    width: '130px',
     render: (r) => <StatusBadge status={r.status} />,
   },
   {
@@ -169,7 +167,7 @@ const TD_BASE = {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function HandoverHistoryPage() {
+export default function BrokerRestartHistory() {
   const todayStr = new Date().toISOString().split('T')[0];
 
   const [inputDate, setInputDate]       = useState(todayStr);
@@ -195,7 +193,7 @@ export default function HandoverHistoryPage() {
     setStatusFilter('all');
     setPage(1);
     try {
-      const res = await getHistoryHandovers(inputDate);
+      const res = await getBrokerRestartHistory(inputDate);
       setData(res?.SubsetsData || []);
       setFetchedDate(inputDate);
       setHasFetched(true);
@@ -225,8 +223,8 @@ export default function HandoverHistoryPage() {
 
   // ── Sort ──────────────────────────────────────────────────────────────────
   const sorted = [...filtered].sort((a, b) => {
-    let av = a[sortKey] ?? '';
-    let bv = b[sortKey] ?? '';
+    const av = a[sortKey] ?? '';
+    const bv = b[sortKey] ?? '';
     return sortDir === 'asc'
       ? String(av).localeCompare(String(bv))
       : String(bv).localeCompare(String(av));
@@ -282,10 +280,9 @@ export default function HandoverHistoryPage() {
       <div className="sets-section">
         <h2>📅 Select Date</h2>
 
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '1.5rem', flexWrap: 'wrap' }}>
-
+        <div className="date-controls-row">
           {/* Calendar input */}
-          <div className="form-group">
+          <div className="form-group" style={{ margin: 0 }}>
             <label htmlFor="handover-date">
               Date <span className="required-star">*</span>
             </label>
@@ -293,26 +290,11 @@ export default function HandoverHistoryPage() {
               id="handover-date"
               type="date"
               className="form-input"
-              style={{ minWidth: '200px', cursor: 'pointer' }}
               value={inputDate}
               max={todayStr}
               onChange={(e) => setInputDate(e.target.value)}
             />
           </div>
-
-          {/* Human-readable preview of selected date */}
-          {inputDate && (
-            <div className="readonly-info-box">
-              <span>
-                {new Date(inputDate + 'T00:00:00').toLocaleDateString('en-GB', {
-                  weekday: 'long', day: '2-digit', month: 'long', year: 'numeric',
-                })}
-              </span>
-              {fetchedDate === inputDate && (
-                <span className="readonly-badge">✓ Fetched</span>
-              )}
-            </div>
-          )}
 
           {/* Fetch button */}
           <button
@@ -376,21 +358,10 @@ export default function HandoverHistoryPage() {
         <div className="activity-log-section" style={{ padding: 0, overflow: 'hidden' }}>
 
           {/* Table header + filters */}
-          <div
-            style={{
-              padding: '1.5rem 2rem',
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              flexWrap: 'wrap',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '1rem',
-            }}
-          >
+          <div className="table-controls-bar">
             <h2 style={{ margin: 0 }}>🗂 Handover Sessions</h2>
 
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              {/* Search */}
               <input
                 className="form-input"
                 style={{ minWidth: '210px', padding: '0.55rem 1rem' }}
@@ -399,7 +370,6 @@ export default function HandoverHistoryPage() {
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
 
-              {/* Status filter */}
               <select
                 className="form-input server-set-dropdown"
                 style={{ minWidth: '150px', padding: '0.55rem 2.5rem 0.55rem 1rem', cursor: 'pointer' }}
@@ -408,16 +378,14 @@ export default function HandoverHistoryPage() {
               >
                 {statuses.map((s) => (
                   <option key={s} value={s}>
-                    {s === 'all'
-                      ? 'All Statuses'
-                      : s.charAt(0).toUpperCase() + s.slice(1)}
+                    {s === 'all' ? 'All Statuses' : s.charAt(0).toUpperCase() + s.slice(1)}
                   </option>
                 ))}
               </select>
             </div>
           </div>
 
-          {/* Empty */}
+          {/* Empty state */}
           {sorted.length === 0 && (
             <div className="loading-container">
               <span style={{ fontSize: '2.5rem' }}>🔍</span>
@@ -446,9 +414,7 @@ export default function HandoverHistoryPage() {
                           {col.label}
                           {col.sortable && (
                             <span style={{ marginLeft: '0.4rem', opacity: sortKey === col.key ? 1 : 0.25 }}>
-                              {sortKey === col.key
-                                ? sortDir === 'asc' ? '↑' : '↓'
-                                : '⇅'}
+                              {sortKey === col.key ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}
                             </span>
                           )}
                         </th>
@@ -459,14 +425,9 @@ export default function HandoverHistoryPage() {
                     {paginated.map((row, idx) => (
                       <tr
                         key={idx}
-                        onMouseEnter={(e) =>
-                          (e.currentTarget.style.background = 'rgba(46,213,255,0.035)')
-                        }
-                        onMouseLeave={(e) =>
-                          (e.currentTarget.style.background = 'transparent')
-                        }
+                        onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(46,213,255,0.035)')}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                       >
-                        {/* Row number */}
                         <td
                           style={{
                             ...TD_BASE,
@@ -493,22 +454,11 @@ export default function HandoverHistoryPage() {
               </div>
 
               {/* Pagination */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '1.1rem 2rem',
-                  borderTop: '1px solid var(--border-color)',
-                  flexWrap: 'wrap',
-                  gap: '1rem',
-                }}
-              >
+              <div className="pagination-bar">
                 <span className="log-message">
                   Showing{' '}
                   <strong style={{ color: 'var(--primary-blue)' }}>
-                    {(page - 1) * PAGE_SIZE + 1}–
-                    {Math.min(page * PAGE_SIZE, sorted.length)}
+                    {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, sorted.length)}
                   </strong>{' '}
                   of{' '}
                   <strong style={{ color: 'var(--primary-blue)' }}>{sorted.length}</strong>{' '}
@@ -532,14 +482,12 @@ export default function HandoverHistoryPage() {
                         style={{
                           padding: '0.4rem 0.85rem',
                           fontSize: '0.85rem',
-                          ...(page === p
-                            ? {
-                                background: 'rgba(46,213,255,0.15)',
-                                borderColor: 'var(--primary-blue)',
-                                color: 'var(--primary-blue)',
-                                fontWeight: 700,
-                              }
-                            : {}),
+                          ...(page === p ? {
+                            background: 'rgba(46,213,255,0.15)',
+                            borderColor: 'var(--primary-blue)',
+                            color: 'var(--primary-blue)',
+                            fontWeight: 700,
+                          } : {}),
                         }}
                         onClick={() => setPage(p)}
                       >
@@ -556,23 +504,6 @@ export default function HandoverHistoryPage() {
           )}
         </div>
       )}
-
-      {/* ── Extra CSS for server pills (only structural, scoped inline) ───── */}
-      <style>{`
-        .server-pill-item {
-          display: inline-block;
-          padding: 0.18rem 0.5rem;
-          border-radius: 4px;
-          background: rgba(138, 43, 226, 0.12);
-          color: #b388ff;
-          border: 1px solid rgba(138, 43, 226, 0.28);
-          font-family: 'Courier New', monospace;
-          font-size: 0.75rem;
-          font-weight: 600;
-          line-height: 1.4;
-        }
-      `}</style>
-
     </div>
   );
 }
