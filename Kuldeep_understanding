@@ -1,0 +1,45 @@
+
+#!/bin/bash
+
+
+        >/home/scripts/Rohit_PORT/FINAL_DATA.txt
+        > /home/scripts/Rohit_PORT/netstat.txt
+        > /home/scripts/Rohit_PORT/FINAL_DATA.json
+        > /home/scripts/Rohit_PORT/`hostname -i`_FINAL_DATA.json
+        > /home/scripts/Rohit_PORT/FILE_NAME
+
+
+
+
+        netstat -atn >> /home/scripts/Rohit_PORT/netstat.txt
+
+        echo '{"'    >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo `hostname` >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo '" :{"ip" : "' >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo `hostname -i`  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+
+                echo '","date" : "' >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo `date`  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+
+
+
+
+#--------------------------ISOLATORDATA
+        echo '","ISOLATOR" : {' >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        for i in `cat /home/scripts/Rohit_PORT/BROKER_PORT.txt | grep ISOLATOR`
+        do
+        BKNM=`echo $i| cut -d ":" -f1`
+        echo '"'   >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo "${BKNM}"  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        echo '":['  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        PORT=`echo $i| cut -d ":" -f2`
+        echo "${PORT},"  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+
+if ! grep -qiE "0\.0\.0\.0:${PORT}|:::${PORT}.*listen" /home/scripts/Rohit_PORT/netstat.txt
+#   if ["`cat /home/scripts/Rohit_PORT/netstat.txt | grep -iE "0\.0\.0\.0:${PORT}|...:${PORT}" | grep -i listen`" == "" ]
+        then
+                echo "0,"  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        else
+           echo "1,"  >> /home/scripts/Rohit_PORT/FINAL_DATA.txt
+        fi
+"/home/scripts/Rohit_PORT/Getdata.sh" 325L, 12495B
