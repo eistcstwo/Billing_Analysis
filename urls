@@ -263,6 +263,8 @@ const BillingAnalysis = () => {
   };
 
   // Upload handling for three files
+  // - Roster + Attendance Sheet 1  →  POST /EISHOME_TEST/projectRoster/upload/
+  // - Attendance Sheet 2 (WFH)     →  POST /EISHOME_TEST/projectRoster/upload-wfh/
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
     if (!rosterFile && !attendance1File && !attendance2File) {
@@ -274,29 +276,45 @@ const BillingAnalysis = () => {
     setError(null);
 
     try {
-      const formData = new FormData();
-      if (rosterFile) formData.append('roster', rosterFile);
-      if (attendance1File) formData.append('attendance_sheet_1', attendance1File);
-      if (attendance2File) formData.append('attendance_sheet_2', attendance2File);
-
-      // TODO: replace with your real upload endpoint and add any auth headers required.
-      const uploadUrl = '/EISHOME_TEST/projectRoster/upload/'; // <-- change me
       const headers = getAuthHeaders();
-      delete headers['Content-Type'];
-      const resp = await fetch(uploadUrl, {
-        method: 'POST',
-        body: formData,
-        headers: headers,
-      });
+      delete headers['Content-Type']; // let the browser set multipart boundary
 
-      if (!resp.ok) {
-        const errText = await resp.text();
-        throw new Error(errText || `${resp.status} ${resp.statusText}`);
+      // --- Upload roster + attendance sheet 1 (if either is provided) ---
+      if (rosterFile || attendance1File) {
+        const formData = new FormData();
+        if (rosterFile) formData.append('roster', rosterFile);
+        if (attendance1File) formData.append('attendance_sheet_1', attendance1File);
+
+        const resp = await fetch('/EISHOME_TEST/projectRoster/upload/', {
+          method: 'POST',
+          body: formData,
+          headers,
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(errText || `${resp.status} ${resp.statusText}`);
+        }
       }
 
-      const result = await resp.json().catch(() => null);
+      // --- Upload attendance sheet 2 to the dedicated WFH endpoint ---
+      if (attendance2File) {
+        const wfhFormData = new FormData();
+        wfhFormData.append('attendance_sheet_2', attendance2File);
+
+        const wfhResp = await fetch('/EISHOME_TEST/projectRoster/upload-wfh/', {
+          method: 'POST',
+          body: wfhFormData,
+          headers,
+        });
+
+        if (!wfhResp.ok) {
+          const errText = await wfhResp.text();
+          throw new Error(errText || `${wfhResp.status} ${wfhResp.statusText}`);
+        }
+      }
+
       alert('Files uploaded successfully.');
-      // Optionally refresh data or close modal
       setShowUploadModal(false);
       setRosterFile(null);
       setAttendance1File(null);
@@ -967,7 +985,7 @@ const BillingAnalysis = () => {
                 </label>
 
                 <label>
-                  Attendance sheet 2:
+                  Attendance sheet 2 (WFH):
                   <input
                     type="file"
                     accept=".csv,.xlsx,.xls"
