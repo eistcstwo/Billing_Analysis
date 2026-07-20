@@ -333,6 +333,88 @@ const BillingAnalysis = () => {
 
   const paginate = (pageNumber) => setCurrentPage(pageNumber);
 
+  // Build CSV rows based on which table shape is active, then trigger a download
+  const escapeCsv = (val) => {
+    const str = val === null || val === undefined ? '' : String(val);
+    if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+    return str;
+  };
+
+  const handleDownload = () => {
+    if (!billingData.length) return;
+
+    let headers = [];
+    let rows = [];
+
+    if (action === 'count') {
+      headers = ['Employee', 'Employee ID', 'Period Start', 'Period End', 'Total WFO', 'Total WFH', 'Total WO', 'Total Working Days', 'Total Leaves', 'Total WO and Leaves'];
+      rows = billingData.map(item => {
+        const count = item.counts || {};
+        return [
+          item.employee || '-',
+          item.employee_id || '-',
+          item.period_start || '-',
+          item.period_end || '-',
+          count['Total WFO'] || 0,
+          count['Total WFH'] || 0,
+          count['Total WO'] || 0,
+          count['Total working days'] || 0,
+          count['Total Leaves'] || 0,
+          count['Total WO and Leaves'] || 0
+        ];
+      });
+    } else if (action === 'low_hours') {
+      headers = ['Name', 'Employee ID', 'Team', 'Date', 'Shift', 'Net Office Time', 'Status'];
+      rows = billingData.map(item => [
+        item.name || '-',
+        item.employee_id || '-',
+        item.team || '-',
+        item.date || '-',
+        item.shift || '-',
+        item.net_office_time || '-',
+        item.status === '❌' || item.status === 'False' || item.status === false ? 'Absent' : (item.status || '-')
+      ]);
+    } else {
+      headers = ['Name', 'Team', 'Date', 'Schedule', 'First In', 'Last Out', 'Out of Office Time', 'Net Office Time', 'Status', 'Comment'];
+      rows = billingData.map(item => {
+        const rosterId = item.id || item.roster_id;
+        const attendance = item.attendance || {};
+        const annotation = annotations[rosterId] || { comment: item.comment || '' };
+        let statusLabel = attendance.status;
+        if (attendance.status === 'False' || attendance.status === false) statusLabel = 'Absent';
+        else if (attendance.status === 'True' || attendance.status === 'true') statusLabel = 'Present';
+        else statusLabel = attendance.status || '-';
+        return [
+          item.name || item.employee_name || '-',
+          item.team || item.teamname || '-',
+          item.date || '-',
+          item.schedule || '-',
+          attendance.first_in || '-',
+          attendance.last_out || '-',
+          attendance.out_of_office_time || '-',
+          attendance.net_office_time || '-',
+          statusLabel,
+          annotation.comment || ''
+        ];
+      });
+    }
+
+    const csvContent = [headers, ...rows]
+      .map(row => row.map(escapeCsv).join(','))
+      .join('\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    link.href = url;
+    link.download = `billing_analysis_${action || 'results'}_${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   //  Early return AFTER all hooks
   if (currentPage_nav === 'invoice') {
     return (
@@ -742,6 +824,31 @@ const BillingAnalysis = () => {
                   <option value={100}>100</option>
                 </select>
               </label>
+              <button
+                type="button"
+                onClick={handleDownload}
+                className="download-btn"
+                title="Download results as CSV"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  fontSize: '0.9rem',
+                  cursor: 'pointer'
+                }}
+              >
+                <svg
+                  width="16" height="16" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                >
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Download
+              </button>
               <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1}>
                 Previous
               </button>
