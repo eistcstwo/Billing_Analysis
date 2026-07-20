@@ -1,10 +1,4 @@
-export const getHistoryHandovers = async (date) => {
-  try {
-    const uid = localStorage.getItem('uidd');
- 
-    if (!uid) {
-      throw new Error('User ID (uidd) not found in localStorage');
-    }import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import './BillingAnalysis.css';
 import InvoiceGenerator from '../InvoiceGenerator/InvoiceGenerator';
 
@@ -832,28 +826,3 @@ const BillingAnalysis = () => {
 };
 
 export default BillingAnalysis;
-
- 
-    if (!date) {
-      throw new Error('Date is required');
-    }
- 
-    const payload = {
-      uidd: uid,
-      date: date,   // YYYY-MM-DD
-    };
- 
-    const response = await api.post('/get_shiftHandover_history/', payload, {
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
- 
-    console.log('getHistoryHandovers response:', response);
-    return response.data;
- 
-  } catch (error) {
-    console.error('getHistoryHandovers error:', error);
-    throw error;
-  }
