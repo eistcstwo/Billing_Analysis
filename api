@@ -4,7 +4,835 @@ export const getHistoryHandovers = async (date) => {
  
     if (!uid) {
       throw new Error('User ID (uidd) not found in localStorage');
+    }import React, { useState, useMemo, useEffect } from 'react';
+import './BillingAnalysis.css';
+import InvoiceGenerator from '../InvoiceGenerator/InvoiceGenerator';
+
+const API_BASE = 'https://10.191.171.12:5443/EISHOME/projectRoster/search/';
+const ANNOTATION_API = 'https://10.191.171.12:5443/EISHOME/projectRoster/update_annotation/';
+
+const getAuthHeaders = () => {
+  const sessionId = localStorage.getItem('sessionid');
+  return {
+    'Content-Type': 'application/json',
+    ...(sessionId && { 'Authorization': `Bearer ${sessionId}` })
+  };
+};
+
+const BillingAnalysis = () => {
+  const [currentPage_nav, setCurrentPage_nav] = useState('billing');
+
+  // Search / filters
+  const [q, setQ] = useState('');
+  const [id, setId] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [teamname, setTeamname] = useState('');
+  const [shift, setShift] = useState('');
+  const [action, setAction] = useState('');
+
+  // data + UI state
+  const [billingData, setBillingData] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // state for fetched dates and months
+  const [validDates, setValidDates] = useState([]);
+  const [availableMonths, setAvailableMonths] = useState([]);
+
+  // state for teams and shifts dropdowns
+  const [availableTeams, setAvailableTeams] = useState([]);
+  const [availableShifts, setAvailableShifts] = useState([]);
+  const [showTeamDropdown, setShowTeamDropdown] = useState(false);
+  const [showShiftDropdown, setShowShiftDropdown] = useState(false);
+
+  // State for annotations
+  const [annotations, setAnnotations] = useState({});
+  const [submittingAnnotations, setSubmittingAnnotations] = useState({});
+  const [editingRows, setEditingRows] = useState({});
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+
+  // upload modal
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [rosterFile, setRosterFile] = useState(null);
+  const [attendance1File, setAttendance1File] = useState(null);
+  const [attendance2File, setAttendance2File] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  // Min and max dates for date inputs
+  const minDate = useMemo(() => {
+    if (validDates.length === 0) return '';
+    return validDates[0];
+  }, [validDates]);
+
+  const maxDate = useMemo(() => {
+    if (validDates.length === 0) return '';
+    return validDates[validDates.length - 1];
+  }, [validDates]);
+
+  // Extract valid dates from months array
+  const extractValidDatesFromMonths = (months) => {
+    const dates = [];
+    months.forEach(monthStr => {
+      const [year, month] = monthStr.split('-');
+      const daysInMonth = new Date(year, month, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const dateStr = `${year}-${month}-${String(day).padStart(2, '0')}`;
+        dates.push(dateStr);
+      }
+    });
+    setValidDates(dates.sort());
+  };
+
+  // Fetch months based on any provided field
+  const fetchMonths = async (fieldName, fieldValue) => {
+    if (!fieldValue) return;
+    try {
+      const params = new URLSearchParams({ action: 'get_months' });
+      params.append(fieldName, fieldValue);
+      const response = await fetch(`${API_BASE}?${params.toString()}`, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error(`Failed to fetch months: ${response.status}`);
+      const data = await response.json();
+      const months = data.months && Array.isArray(data.months) ? data.months
+                   : Array.isArray(data) ? data : [];
+      setAvailableMonths(months);
+      extractValidDatesFromMonths(months);
+    } catch (err) {
+      console.error('Error fetching months:', err);
     }
+  };
+
+  // Fetch valid dates when any field changes
+  useEffect(() => {
+    const fieldName = q ? 'q' : id ? 'id' : teamname ? 'teamname' : shift ? 'shift' : null;
+    const fieldValue = q || id || teamname || shift;
+    if (fieldName && fieldValue) fetchMonths(fieldName, fieldValue);
+  }, [q, id, teamname, shift]);
+
+  // Fetch teams when team input is focused
+  const fetchTeams = async () => {
+    try {
+      const response = await fetch(`${API_BASE}?action=get_teams`, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error(`Failed to fetch teams: ${response.status}`);
+      const data = await response.json();
+      if (data.teams && Array.isArray(data.teams)) setAvailableTeams(data.teams);
+      else if (Array.isArray(data)) setAvailableTeams(data);
+    } catch (err) {
+      console.error('Error fetching teams:', err);
+    }
+  };
+
+  // Fetch shifts when shift input is focused
+  const fetchShifts = async () => {
+    try {
+      const response = await fetch(`${API_BASE}?action=get_shifts`, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      });
+      if (!response.ok) throw new Error(`Failed to fetch shifts: ${response.status}`);
+      const data = await response.json();
+      if (data.shifts && Array.isArray(data.shifts)) setAvailableShifts(data.shifts);
+      else if (Array.isArray(data)) setAvailableShifts(data);
+    } catch (err) {
+      console.error('Error fetching shifts:', err);
+    }
+  };
+
+  // Handle search
+  const handleSearch = async (e) => {
+    if (e) e.preventDefault();
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams();
+      if (q) params.append('q', q);
+      if (id) params.append('id', id);
+      if (startDate) params.append('start_date', startDate);
+      if (endDate) params.append('end_date', endDate);
+      if (teamname) params.append('teamname', teamname);
+      if (shift) params.append('shift', shift);
+      if (action) params.append('action', action);
+
+      const response = await fetch(`${API_BASE}?${params.toString()}`, {
+        method: 'GET',
+        headers: getAuthHeaders()
+      });
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const data = await response.json();
+      console.log('Search results:', data);
+
+      let processedData = [];
+
+      if (action === 'count' && Array.isArray(data)) {
+        processedData = data;
+      } else if (action === 'low_hours' && data.employees_with_low_hours) {
+        processedData = data.employees_with_low_hours;
+      } else if (Array.isArray(data)) {
+        processedData = data;
+        const initialAnnotations = {};
+        data.forEach(item => {
+          const rosterId = item.id || item.roster_id;
+          initialAnnotations[rosterId] = {
+            comment: item.comment || '',
+            status: item.status === 'False' || item.status === false ? false : true
+          };
+        });
+        setAnnotations(initialAnnotations);
+      }
+
+      setBillingData(processedData);
+      setCurrentPage(1);
+    } catch (err) {
+      setError(err.message);
+      setBillingData([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Upload handling
+  const handleUploadSubmit = async (e) => {
+    e.preventDefault();
+    if (!rosterFile && !attendance1File && !attendance2File) {
+      alert('Please select at least one file to upload.');
+      return;
+    }
+
+    setUploading(true);
+    setError(null);
+
+    try {
+      const headers = getAuthHeaders();
+      delete headers['Content-Type'];
+
+      if (rosterFile || attendance1File) {
+        const formData = new FormData();
+        if (rosterFile) formData.append('roster', rosterFile);
+        if (attendance1File) formData.append('attendance_sheet_1', attendance1File);
+
+        const resp = await fetch('/EISHOME_TEST/projectRoster/upload/', {
+          method: 'POST',
+          body: formData,
+          headers,
+        });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(errText || `${resp.status} ${resp.statusText}`);
+        }
+      }
+
+      if (attendance2File) {
+        const wfhFormData = new FormData();
+        wfhFormData.append('attendance_sheet_2', attendance2File);
+
+        const wfhResp = await fetch('/EISHOME_TEST/projectRoster/upload-wfh/', {
+          method: 'POST',
+          body: wfhFormData,
+          headers,
+        });
+        if (!wfhResp.ok) {
+          const errText = await wfhResp.text();
+          throw new Error(errText || `${wfhResp.status} ${wfhResp.statusText}`);
+        }
+      }
+
+      alert('Files uploaded successfully.');
+      setShowUploadModal(false);
+      setRosterFile(null);
+      setAttendance1File(null);
+      setAttendance2File(null);
+    } catch (err) {
+      console.error('Upload failed', err);
+      alert(`Upload failed: ${err.message || err}`);
+      setError(err.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  // Handle annotation submission
+  const handleAnnotationSubmit = async (rosterId) => {
+    const annotation = annotations[rosterId];
+    if (!annotation || !annotation.comment.trim()) {
+      alert('Please enter a comment before submitting');
+      return;
+    }
+
+    setSubmittingAnnotations(prev => ({ ...prev, [rosterId]: true }));
+
+    try {
+      const response = await fetch(ANNOTATION_API, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          roster_id: rosterId,
+          comment: annotation.comment,
+          status: annotation.status ? 'True' : 'False'
+        })
+      });
+
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+      const result = await response.json();
+      console.log('Annotation result:', result);
+      alert('Annotation submitted successfully!');
+
+      setAnnotations(prev => ({
+        ...prev,
+        [rosterId]: { comment: '', status: true }
+      }));
+      setEditingRows(prev => ({ ...prev, [rosterId]: false }));
+    } catch (err) {
+      alert(`Error submitting annotation: ${err.message}`);
+    } finally {
+      setSubmittingAnnotations(prev => ({ ...prev, [rosterId]: false }));
+    }
+  };
+
+  const toggleEditMode = (rosterId) => {
+    setEditingRows(prev => ({ ...prev, [rosterId]: !prev[rosterId] }));
+  };
+
+  const updateAnnotationComment = (rosterId, comment) => {
+    setAnnotations(prev => ({
+      ...prev,
+      [rosterId]: { ...prev[rosterId], comment }
+    }));
+  };
+
+  const updateAnnotationStatus = (rosterId, status) => {
+    setAnnotations(prev => ({
+      ...prev,
+      [rosterId]: { ...prev[rosterId], status }
+    }));
+  };
+
+  const handleMonthClick = (monthStr) => {
+    const match = monthStr.match(/^(\d{4})-(\d{2})$/);
+    if (!match) {
+      console.error('Unexpected month format:', monthStr);
+      return;
+    }
+    const [, year, mm] = match;
+    const daysInMonth = new Date(Number(year), Number(mm), 0).getDate();
+    setStartDate(`${year}-${mm}-01`);
+    setEndDate(`${year}-${mm}-${String(daysInMonth).padStart(2, '0')}`);
+  };
+
+  // Pagination calculations
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentItems = billingData.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(billingData.length / itemsPerPage);
+
+  const paginate = (pageNumber) => setCurrentPage(pageNumber);
+
+  //  Early return AFTER all hooks
+  if (currentPage_nav === 'invoice') {
+    return (
+
+      <div style = {{ position: 'relative', minHeight: '100vh' }}>
+            <button
+            onClick={() => setCurrentPage_nav('billing')}
+            className="back-to-billing-btn">
+          ← Back to Billing Analysis
+        </button>
+        <InvoiceGenerator />
+      </div>
+    );
+  }
+
+  // Render table based on action type
+  const renderTable = () => {
+    if (action === 'count') {
+      return (
+        <div className="results-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Employee ID</th>
+                <th>Period Start</th>
+                <th>Period End</th>
+                <th>Total WFO</th>
+                <th>Total WFH</th>
+                <th>Total WO</th>
+                <th>Total Working Days</th>
+                <th>Total Leaves</th>
+                <th>Total WO and Leaves</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentItems.map((item, idx) => {
+                const count = item.counts || {};
+                return (
+                  <tr key={idx}>
+                    <td>{item.employee || '-'}</td>
+                    <td>{item.employee_id || '-'}</td>
+                    <td>{item.period_start || '-'}</td>
+                    <td>{item.period_end || '-'}</td>
+                    <td>{count['Total WFO'] || 0}</td>
+                    <td>{count['Total WFH'] || 0}</td>
+                    <td>{count['Total WO'] || 0}</td>
+                    <td>{count['Total working days'] || 0}</td>
+                    <td>{count['Total Leaves'] || 0}</td>
+                    <td>{count['Total WO and Leaves'] || 0}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    } else if (action === 'low_hours') {
+      return (
+        <div className="results-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Employee ID</th>
+                <th>Team</th>
+                <th>Date</th>
+                <th>Shift</th>
+                <th>Net Office Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentItems.map((item, idx) => (
+                <tr key={idx}>
+                  <td>{item.name || '-'}</td>
+                  <td>{item.employee_id || '-'}</td>
+                  <td>{item.team || '-'}</td>
+                  <td>{item.date || '-'}</td>
+                  <td>{item.shift || '-'}</td>
+                  <td>{item.net_office_time || '-'}</td>
+                  <td>
+                    {item.status === '❌' || item.status === 'False' || item.status === false ? (
+                      <span style={{ color: '#ffc4c4', fontSize: '1.2rem' }}>❌</span>
+                    ) : (
+                      item.status || '-'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    } else {
+      return (
+        <div className="results-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Team</th>
+                <th>Date</th>
+                <th>Schedule</th>
+                <th>First In</th>
+                <th>Last Out</th>
+                <th>Out of Office Time</th>
+                <th>Net Office Time</th>
+                <th>Status</th>
+                <th>Change Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {currentItems.map((item) => {
+                const rosterId = item.id || item.roster_id;
+                const annotation = annotations[rosterId] || { comment: item.comment || '', status: true };
+                const isSubmitting = submittingAnnotations[rosterId];
+                const attendance = item.attendance || {};
+
+                return (
+                  <tr key={rosterId}>
+                    <td>{item.name || item.employee_name || '-'}</td>
+                    <td>{item.team || item.teamname || '-'}</td>
+                    <td>{item.date || '-'}</td>
+                    <td>{item.schedule || '-'}</td>
+                    <td>{attendance.first_in || '-'}</td>
+                    <td>{attendance.last_out || '-'}</td>
+                    <td>{attendance.out_of_office_time || '-'}</td>
+                    <td>{attendance.net_office_time || '-'}</td>
+                    <td>
+                      {attendance.status === 'False' || attendance.status === false ? (
+                        <span style={{ color: '#e90000', fontSize: '1.2rem' }}>❌</span>
+                      ) : attendance.status === 'True' || attendance.status === 'true' ? (
+                        <span style={{ fontSize: '1.2rem' }}>✅</span>
+                      ) : (
+                        attendance.status || '-'
+                      )}
+                    </td>
+                    <td>
+                      {editingRows[rosterId] ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '4px' }}>
+                          <input
+                            type="text"
+                            className="form-input"
+                            value={annotation.comment}
+                            onChange={(e) => updateAnnotationComment(rosterId, e.target.value)}
+                            placeholder="Enter comment"
+                            style={{ flex: 1, minWidth: '120px', maxWidth: '180px' }}
+                          />
+                          <select
+                            className="form-select"
+                            value={annotation.status ? 'true' : 'false'}
+                            onChange={(e) => updateAnnotationStatus(rosterId, e.target.value === 'true')}
+                            style={{
+                              padding: '6px 10px',
+                              fontSize: '0.9rem',
+                              cursor: 'pointer',
+                              minWidth: '30px',
+                              color: annotation.status ? '#28a745' : '#dc3545',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            <option value="true" style={{ color: '#28a745' }}>Present</option>
+                            <option value="false" style={{ color: '#dc3545' }}>Absent</option>
+                          </select>
+                          <button
+                            className="search-btn"
+                            onClick={() => handleAnnotationSubmit(rosterId)}
+                            style={{ padding: '6px 12px', fontSize: '0.9rem', whiteSpace: 'nowrap' }}
+                          >
+                            {isSubmitting ? 'Submitting...' : 'Submit'}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => toggleEditMode(rosterId)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: '#007bff',
+                            cursor: 'pointer',
+                            padding: '6px 12px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          <svg
+                            width="16" height="16" viewBox="0 0 24 24"
+                            fill="none" stroke="currentColor"
+                            strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                          >
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                          </svg>
+                          Edit
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+  };
+
+  return (
+    <div className="billing-analysis">
+      <h2>Billing Analysis</h2>
+
+      <div className="controls-row" style={{ display: 'flex', gap: '12px', marginBottom: 12 }}>
+        <button type="button" onClick={() => setShowUploadModal(true)} className="upload-btn">
+          Upload Roster & Attendance (3 files)
+        </button>
+        <button
+          type="button"
+          onClick={() => setCurrentPage_nav('invoice')}
+          className="invoice-generator-btn"
+        >
+          Invoice Generator
+        </button>
+      </div>
+
+      {/* Search Form */}
+      <div className="search-form">
+        <div className="horizontal-form-grid">
+          <div className="form-field">
+            <label>Search Query (Name)</label>
+            <input
+              type="text"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Enter name"
+            />
+          </div>
+
+          <div className="form-field">
+            <label>ID</label>
+            <input
+              type="text"
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              placeholder="Enter ID"
+            />
+          </div>
+
+          <div className="form-field">
+            <label>Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              min={minDate}
+              max={maxDate}
+              onChange={(e) => setStartDate(e.target.value)}
+            />
+          </div>
+
+          <div className="form-field">
+            <label>End Date</label>
+            <input
+              type="date"
+              value={endDate}
+              min={minDate}
+              max={maxDate}
+              onChange={(e) => setEndDate(e.target.value)}
+            />
+          </div>
+
+          <div className="form-field dropdown-field" style={{ position: 'relative' }}>
+            <label>Team Name</label>
+            <input
+              type="text"
+              value={teamname}
+              onChange={(e) => {
+                setTeamname(e.target.value);
+                if (!e.target.value) setShowTeamDropdown(false);
+              }}
+              onFocus={() => { fetchTeams(); setShowTeamDropdown(true); }}
+              onBlur={() => { setTimeout(() => setShowTeamDropdown(false), 200); }}
+              placeholder="Enter or select team"
+            />
+            {showTeamDropdown && availableTeams.length > 0 && (
+              <div className="dropdown-menu">
+                {availableTeams.map((team, idx) => (
+                  <div
+                    key={idx}
+                    className="dropdown-item"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setTeamname(team);
+                      setShowTeamDropdown(false);
+                    }}
+                  >
+                    {team}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="form-field dropdown-field" style={{ position: 'relative' }}>
+            <label>Shift</label>
+            <input
+              type="text"
+              value={shift}
+              onChange={(e) => {
+                setShift(e.target.value);
+                if (!e.target.value) setShowShiftDropdown(false);
+              }}
+              onFocus={() => { fetchShifts(); setShowShiftDropdown(true); }}
+              onBlur={() => { setTimeout(() => setShowShiftDropdown(false), 200); }}
+              placeholder="Enter or select shift"
+            />
+            {showShiftDropdown && availableShifts.length > 0 && (
+              <div className="dropdown-menu">
+                {availableShifts.map((shiftItem, idx) => (
+                  <div
+                    key={idx}
+                    className="dropdown-item"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setShift(shiftItem);
+                      setShowShiftDropdown(false);
+                    }}
+                  >
+                    {shiftItem}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="form-field">
+            <label>Action</label>
+            <select value={action} onChange={(e) => setAction(e.target.value)}>
+              <option value="">None</option>
+              <option value="count">Count</option>
+              <option value="low_hours">Low Hours</option>
+            </select>
+          </div>
+
+          <div className="form-field">
+            <button
+              type="button"
+              className="search-btn"
+              disabled={isLoading}
+              onClick={handleSearch}
+            >
+              {isLoading ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+        </div>
+
+        {/* Months selector */}
+        {availableMonths.length > 0 && (
+          <div className="months-selector">
+            <label>Available Months (click to select dates):</label>
+            <div className="months-buttons">
+              {availableMonths.map((month, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="month-btn"
+                  onClick={() => handleMonthClick(month)}
+                >
+                  {month}
+                </button>
+              ))}
+            </div>
+            {startDate && endDate && (
+              <div className="dates-info">
+                Selected: {startDate} to {endDate}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Error Message */}
+      {error && <div className="error">Error: {error}</div>}
+
+      {/* Results */}
+      {billingData.length > 0 && (
+        <div className="results-area">
+          <div className="table-controls">
+            <div className="table-info">
+              Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, billingData.length)} of {billingData.length} results
+            </div>
+            <div className="pagination-controls">
+              <label>
+                Rows per page:
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => {
+                    setItemsPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </label>
+              <button onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1}>
+                Previous
+              </button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages}>
+                Next
+              </button>
+            </div>
+          </div>
+
+          {renderTable()}
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="upload-modal">
+          <div className="upload-modal-content">
+            <button
+              className="upload-modal-close"
+              onClick={() => setShowUploadModal(false)}
+              aria-label="Close modal"
+            >
+              ×
+            </button>
+
+            <h3>Upload Roster & Attendance Sheets</h3>
+
+            <form onSubmit={handleUploadSubmit}>
+              <div className="upload-fields">
+                <label>
+                  Roster file (required for roster uploads):
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => setRosterFile(e.target.files && e.target.files[0])}
+                  />
+                  {rosterFile && <span className="file-name">{rosterFile.name}</span>}
+                </label>
+
+                <label>
+                  Attendance sheet 1:
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => setAttendance1File(e.target.files && e.target.files[0])}
+                  />
+                  {attendance1File && <span className="file-name">{attendance1File.name}</span>}
+                </label>
+
+                <label>
+                  Attendance sheet 2 (WFH):
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={(e) => setAttendance2File(e.target.files && e.target.files[0])}
+                  />
+                  {attendance2File && <span className="file-name">{attendance2File.name}</span>}
+                </label>
+              </div>
+
+              <div className="upload-actions">
+                <button type="button" onClick={() => setShowUploadModal(false)} disabled={uploading}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={uploading}>
+                  {uploading ? 'Uploading...' : 'Upload Files'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {!isLoading && billingData.length === 0 && !error && (
+        <div className="no-results">
+          No results found. Try adjusting your search criteria.
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default BillingAnalysis;
+
  
     if (!date) {
       throw new Error('Date is required');
